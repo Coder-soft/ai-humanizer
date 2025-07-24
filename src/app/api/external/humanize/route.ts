@@ -1,0 +1,102 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
+
+const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY as string);
+const humanizerApiKey = process.env.HUMANIZER_API_KEY;
+
+// In-memory store for rate limiting
+const rateLimitStore = new Map<string, { count: number; lastRequest: number }>();
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const RATE_LIMIT_COUNT = 10; // 10 requests per window
+
+type HumanizationMode = 'subtle' | 'balanced' | 'strong' | 'stealth';
+
+const prompts = {
+  subtle: `Rewrite the following text to make it sound slightly more natural and conversational. Make only minor changes to improve flow and readability.
+
+Original text:
+"{{text}}"
+
+Humanized text:`,
+  balanced: `Rewrite the following text to make it sound more natural, conversational, and human-like. Fix any grammatical errors, improve the flow, and make it less robotic. Do not add any new information.
+
+Original text:
+"{{text}}"
+
+Humanized text:`,
+  strong: `Rewrite the following text to be much more casual, conversational, and engaging. Take creative liberties to make it sound like a real person wrote it, even if it means significantly changing the sentence structure and vocabulary.
+
+Original text:
+"{{text}}"
+
+Humanized text:`,
+  stealth: {
+    step1: `Analyze the following text and extract the core ideas and key information into a list of bullet points. Do not rewrite or paraphrase, just extract the essential information.
+
+Original text:
+"{{text}}"
+
+Core ideas:`,
+    step2: `Write a new article from the following bullet points. The article should be well-structured, coherent, and engaging. It is crucial that you write in a style that has high perplexity and burstiness. This means you should vary sentence structure dramatically, mixing short, declarative sentences with longer, more complex ones. Use a natural, slightly informal tone, and incorporate contractions (like 'don't', 'isn't', 'it's') where they feel appropriate. Avoid overly formal or obscure words. The goal is to produce a text that is indistinguishable from human writing.
+
+Core ideas:
+"{{text}}"
+
+New article:`,
+  }
+};
+
+async function runPrompt(prompt: string) {
+  const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const result = await model.generateContent(prompt);
+  const response = await result.response;
+  return response.text();
+}
+
+export async function POST(request: NextRequest) {
+  // Rate Limiting
+  const ip = request.ip ?? request.headers.get('x-forwarded-for') ?? 'unknown';
+  const now = Date.now();
+  const userRequests = rateLimitStore.get(ip);
+
+  if (userRequests && now - userRequests.lastRequest < RATE_LIMIT_WINDOW) {
+    if (userRequests.count >= RATE_LIMIT_COUNT) {
+      return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 });
+    }
+    rateLimitStore.set(ip, { count: userRequests.count + 1, lastRequest: now });
+  } else {
+    rateLimitStore.set(ip, { count: 1, lastRequest: now });
+  }
+
+  // API Key Authentication
+  const authHeader = request.headers.get('Authorization');
+  if (!humanizerApiKey || authHeader !== `Bearer ${humanizerApiKey}`) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  try {
+    const { text, mode = 'balanced' } = await request.json() as { text: string; mode: HumanizationMode };
+
+    if (!text) {
+      return NextResponse.json({ error: 'Text is required' }, { status: 400 });
+    }
+
+    let humanizedText = '';
+
+    if (mode === 'stealth') {
+      const step1Prompt = prompts.stealth.step1.replace('{{text}}', text);
+      const coreIdeas = await runPrompt(step1Prompt);
+
+      const step2Prompt = prompts.stealth.step2.replace('{{text}}', coreIdeas);
+      humanizedText = await runPrompt(step2Prompt);
+    } else {
+      const prompt = (prompts[mode] as string).replace('{{text}}', text);
+      humanizedText = await runPrompt(prompt);
+    }
+
+    return NextResponse.json({ humanizedText });
+  } catch (error) {
+    console.error('Error in humanize API:', error);
+    return NextResponse.json({ error: 'Failed to humanize text' }, { status: 500 });
+  }
+}
