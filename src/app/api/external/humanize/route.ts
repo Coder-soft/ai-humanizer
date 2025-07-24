@@ -55,7 +55,7 @@ async function runPrompt(prompt: string) {
 
 export async function POST(request: NextRequest) {
   // Rate Limiting
-  const ip = request.ip ?? request.headers.get('x-forwarded-for') ?? 'unknown';
+  const ip = request.headers.get('x-forwarded-for') ?? 'unknown';
   const now = Date.now();
   const userRequests = rateLimitStore.get(ip);
 
