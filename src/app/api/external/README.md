@@ -82,7 +82,9 @@ This endpoint takes a piece of text and humanizes it based on the selected mode.
 
 The API has a rate limit of 10 requests per minute per IP address. If you exceed this limit, you will receive a `429 Too Many Requests` error.
 
-## Example
+## Examples
+
+### cURL
 
 Here's an example of how to call the API using `curl`:
 
@@ -94,4 +96,44 @@ curl -X POST https://your-app-url.com/api/external/humanize \
     "text": "The aforementioned subject matter is of considerable importance.",
     "mode": "strong"
   }'
+```
+
+### Web App Integration Example (JavaScript)
+
+Here's how you can call the API from a web application using the `fetch` function in JavaScript.
+
+```javascript
+async function humanizeText(textToHumanize) {
+  const apiKey = 'YOUR_API_KEY';
+  const apiUrl = '/api/external/humanize'; // Or your full app URL
+
+  try {
+    const response = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        text: textToHumanize,
+        mode: 'balanced', // Or any other mode
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(`API Error: ${response.status} ${response.statusText} - ${errorData.error}`);
+    }
+
+    const data = await response.json();
+    console.log('Humanized Text:', data.humanizedText);
+    return data.humanizedText;
+  } catch (error) {
+    console.error('Failed to humanize text:', error);
+    // Handle the error in your application (e.g., show a notification)
+  }
+}
+
+// Example usage:
+humanizeText("The aforementioned subject matter is of considerable importance.");
 ```
